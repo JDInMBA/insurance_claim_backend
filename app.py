@@ -4,25 +4,36 @@ import pickle
 import pandas as pd
 from fastapi.middleware.cors import CORSMiddleware
 
+# -----------------------------
+# App initialization
+# -----------------------------
 app = FastAPI(title="Insurance Claim Prediction API")
+
+# CORS configuration (required for frontend access)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # allow all for assignment/demo
+    allow_origins=["*"],          # allow all origins (OK for assignment/demo)
     allow_credentials=True,
-    allow_methods=["*"],  # allows POST, OPTIONS, etc.
+    allow_methods=["*"],          # allow POST, OPTIONS, etc.
     allow_headers=["*"],
 )
 
+# -----------------------------
+# Load trained model
+# -----------------------------
 with open("model.pkl", "rb") as f:
     model = pickle.load(f)
 
 preprocessor = model.named_steps["preprocess"]
 
-# Extract feature groups
+# Extract feature groups from preprocessing pipeline
 num_features = preprocessor.transformers_[0][2]
 cat_features = preprocessor.transformers_[1][2]
 ohe = preprocessor.named_transformers_["cat"]
 
+# -----------------------------
+# Helper: build full feature template
+# -----------------------------
 def build_feature_template():
     data = {}
 
@@ -36,7 +47,9 @@ def build_feature_template():
 
     return data
 
-
+# -----------------------------
+# Request schema
+# -----------------------------
 class PolicyInput(BaseModel):
     policy_tenure: float
     age_of_car: float
@@ -51,13 +64,15 @@ class PolicyInput(BaseModel):
     airbags: int
     ncap_rating: int
 
-
+# -----------------------------
+# Prediction endpoint
+# -----------------------------
 @app.post("/predict")
 def predict_claim(data: PolicyInput):
-    # Build full feature template
+    # Build full feature vector
     feature_data = build_feature_template()
 
-    # Override with user input
+    # Override defaults with user input
     feature_data.update(data.dict())
 
     # Convert to DataFrame
@@ -70,7 +85,7 @@ def predict_claim(data: PolicyInput):
     threshold = 0.4
     prediction = int(prob_claim >= threshold)
 
-    # Risk band
+    # Risk banding
     if prob_claim >= 0.4:
         risk_level = "High"
     elif prob_claim >= 0.2:
@@ -84,3 +99,10 @@ def predict_claim(data: PolicyInput):
         "risk_level": risk_level,
         "threshold_used": threshold
     }
+
+# -----------------------------
+# Explicit OPTIONS handler (CRITICAL FIX)
+# -----------------------------
+@app.options("/predict")
+def options_predict():
+    return {}
