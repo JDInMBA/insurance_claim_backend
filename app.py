@@ -5,30 +5,28 @@ import pandas as pd
 import numpy as np
 from fastapi.middleware.cors import CORSMiddleware
 
-
 app = FastAPI(title="Insurance Claim Prediction API")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],          # OK for assignment/demo
+    allow_origins=["*"],          
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-#
 with open("model.pkl", "rb") as f:
     model = pickle.load(f)
 
 preprocessor = model.named_steps["preprocess"]
 classifier = model.named_steps["classifier"]
 
-# Extract feature groups
+
 num_features = preprocessor.transformers_[0][2]
 cat_features = preprocessor.transformers_[1][2]
 ohe = preprocessor.named_transformers_["cat"]
 
-
+# Human-readable explanations for key drivers
 FEATURE_REASON_MAP = {
     "policy_tenure": "Short policy tenure increases claim risk",
     "population_density": "High population density increases accident exposure",
@@ -37,18 +35,18 @@ FEATURE_REASON_MAP = {
     "age_of_policyholder": "Higher driver age slightly increases claim probability",
 }
 
-# Area clusters (grouped explanation)
 AREA_CLUSTER_PREFIX = "area_cluster_"
-
 
 def build_feature_template():
     data = {}
 
+    # Numerical features → 0 baseline
     for col in num_features:
         data[col] = 0
 
+    # Categorical features → baseline category
     for col, categories in zip(cat_features, ohe.categories_):
-        data[col] = categories[0]  # baseline category
+        data[col] = categories[0]
 
     return data
 
@@ -76,14 +74,12 @@ def predict_claim(data: PolicyInput):
 
     input_df = pd.DataFrame([feature_data])
 
-    # Predict probability
+
     prob_claim = model.predict_proba(input_df)[0][1]
 
-    # Threshold
     threshold = 0.4
     prediction = int(prob_claim >= threshold)
 
-    # Risk banding
     if prob_claim >= 0.4:
         risk_level = "High"
     elif prob_claim >= 0.2:
@@ -91,9 +87,15 @@ def predict_claim(data: PolicyInput):
     else:
         risk_level = "Low"
 
-
     X_transformed = preprocessor.transform(input_df)
-    contributions = X_transformed.toarray()[0] * classifier.coef_[0]
+
+    # Handle sparse vs dense safely
+    if hasattr(X_transformed, "toarray"):
+        X_values = X_transformed.toarray()[0]
+    else:
+        X_values = X_transformed[0]
+
+    contributions = X_values * classifier.coef_[0]
 
     feature_names = (
         list(num_features) +
@@ -105,7 +107,6 @@ def predict_claim(data: PolicyInput):
         "contribution": contributions
     })
 
-    # Keep only positive contributors
     positive_contribs = contrib_df[contrib_df["contribution"] > 0]
     positive_contribs = positive_contribs.sort_values(
         "contribution", ascending=False
@@ -115,16 +116,17 @@ def predict_claim(data: PolicyInput):
 
     for feature in positive_contribs["feature"]:
         if feature.startswith(AREA_CLUSTER_PREFIX):
-            reasons.append("Geographic area has historically higher claim frequency")
+            reasons.append(
+                "Geographic area has historically higher claim frequency"
+            )
         elif feature in FEATURE_REASON_MAP:
             reasons.append(FEATURE_REASON_MAP[feature])
 
         if len(reasons) == 2:
             break
 
-
     return {
-        "claim_probability": round(prob_claim, 4),
+        "claim_probability": round(float(prob_claim), 4),
         "prediction": prediction,
         "risk_level": risk_level,
         "threshold_used": threshold,
