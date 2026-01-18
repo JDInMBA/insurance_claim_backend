@@ -2,10 +2,16 @@ from fastapi import FastAPI
 from pydantic import BaseModel
 import pickle
 import pandas as pd
-
+from fastapi.middleware.cors import CORSMiddleware
 
 app = FastAPI(title="Insurance Claim Prediction API")
-
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # allow all for assignment/demo
+    allow_credentials=True,
+    allow_methods=["*"],  # allows POST, OPTIONS, etc.
+    allow_headers=["*"],
+)
 
 with open("model.pkl", "rb") as f:
     model = pickle.load(f)
